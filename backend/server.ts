@@ -16,7 +16,12 @@ const port = process.env.PORT ? Number(process.env.PORT) : 3001;
 
 /* ---------- Middleware ---------- */
 app.use(pinoHttp({ logger }));
-app.use(cors());
+app.use(cors({
+  origin: ['http://localhost:3000', 'https://localhost:3000', 'https://api.heatsignal.co.uk'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'trpc-accept']
+}));
 app.use(helmet());
 app.use(compression());
 app.use(express.json());
