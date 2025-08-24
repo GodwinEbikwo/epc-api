@@ -3,8 +3,10 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Copy package files and install all deps (including dev)
-COPY package*.json ./
+# Copy backend package files
+COPY package*.json tsconfig.json ./
+
+# Install deps (including dev)
 RUN npm install
 
 # Copy source code
@@ -27,5 +29,4 @@ COPY --from=builder /app/dist ./dist
 
 EXPOSE 3001
 
-# Run compiled server
 CMD ["node", "dist/server.js"]
