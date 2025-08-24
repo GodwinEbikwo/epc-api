@@ -31,19 +31,19 @@ const certificateSearchSchema = z.object({
 const leadSchema = z.object({
   lmk_key: z.string(),
   postcode: z.string(),
-  current_energy_rating: z.string(),
-  main_fuel: z.string(),
+  current_energy_rating: z.string().nullable(),
+  main_fuel: z.string().nullable(),
 });
 
 const certificateSchema = z.object({
   lmk_key: z.string(),
   postcode: z.string(),
-  current_energy_rating: z.string(),
-  main_fuel: z.string(),
-  property_type: z.string(),
+  current_energy_rating: z.string().nullable(),
+  main_fuel: z.string().nullable(),
+  property_type: z.string().nullable(),
   total_floor_area: z.number().nullable(),
   number_habitable_rooms: z.number().nullable(),
-  construction_age_band: z.string(),
+  construction_age_band: z.string().nullable(),
   current_energy_efficiency: z.number().nullable(),
 });
 

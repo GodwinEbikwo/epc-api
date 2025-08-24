@@ -1,0 +1,49 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: coolify-db
+    restart: always
+    environment:
+      POSTGRES_USER: epc_user
+      POSTGRES_PASSWORD: 080godwin.com
+      POSTGRES_DB: epcdb
+    volumes:
+      - coolify-db:/var/lib/postgresql/data
+    networks:
+      - epc-net
+      - coolify
+
+  epc-api:
+    image: epc-api:latest
+    container_name: epc-api
+    restart: always
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+    ports:
+      - "3001:3001"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.epc-api-http.rule=Host(`api.heatsignal.co.uk`)"
+      - "traefik.http.routers.epc-api-http.entrypoints=http"
+      - "traefik.http.routers.epc-api-https.rule=Host(`api.heatsignal.co.uk`)"
+      - "traefik.http.routers.epc-api-https.entrypoints=https"
+      - "traefik.http.routers.epc-api-https.tls.certresolver=letsencrypt"
+      - "traefik.http.services.epc-api.loadbalancer.server.port=3001"
+    networks:
+      - epc-net
+      - coolify
+
+volumes:
+  coolify-db:
+    external: true
+
+networks:
+  epc-net:
+    external: false
+  coolify:
+    external: true
+  
