@@ -1,36 +1,99 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# EPC Lead Generation Platform
 
-## Getting Started
+> Bloomberg Terminal for Boiler Lead Generation - AI-powered property energy intelligence platform that transforms UK government EPC data into high-value leads.
 
-First, run the development server:
+## Quick Start
+
+### Prerequisites
+- Node.js 18+ 
+- pnpm (recommended) or npm
+
+### Development Setup
+
+1. **Install dependencies**
+   ```bash
+   pnpm install
+   pnpm install:backend
+   ```
+
+2. **Configure environment variables**
+   ```bash
+   cp .env.example .env
+   cp backend/.env.example backend/.env
+   ```
+
+3. **Start development servers**
+   ```bash
+   pnpm dev
+   ```
+   
+   This runs both:
+   - Frontend: http://localhost:3000 (Next.js)
+   - Backend API: http://localhost:3001 (Express.js)
+
+### Individual Commands
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# Frontend only
+pnpm dev:frontend
+
+# Backend only  
+pnpm dev:backend
+
+# Build both
+pnpm build
+
+# Linting
+pnpm lint
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Project Structure
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```
+├── app/                 # Next.js App Router
+├── components/          # Shadcn/ui components
+├── backend/            # Express.js API
+│   ├── index.js        # Main API server
+│   └── .env           # Backend environment
+├── lib/               # Frontend utilities
+└── docs/              # Documentation
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Tech Stack
 
-## Learn More
+**Frontend:**
+- Next.js 15 with App Router
+- TypeScript + Tailwind CSS
+- Shadcn/ui + Radix UI components
 
-To learn more about Next.js, take a look at the following resources:
+**Backend:**
+- Express.js with PostgreSQL
+- 28M+ UK property certificates
+- 108M+ improvement recommendations
+- Comprehensive API endpoints for lead generation
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+**Infrastructure:**
+- Database: PostgreSQL on Hetzner VPS
+- Deployment: Docker + Coolify
+- Frontend: Vercel (recommended)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## API Endpoints
 
-## Deploy on Vercel
+- `POST /api/leads/search` - Property search with filters
+- `GET /api/leads/export` - CSV export
+- `GET /api/stats/market` - Market statistics
+- `POST /api/properties/score` - Lead scoring
+- `GET /health` - Health check
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Business Context
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Targeting the UK's **15.8M properties** with poor energy ratings (D-G) that need upgrades. The platform serves boiler installers, heat pump companies, and energy efficiency specialists with intelligent lead generation.
+
+**Market Opportunity:**
+- 17.4M properties on mains gas (prime boiler targets)
+- Average 4+ improvement opportunities per property
+- Government scheme integration potential (ECO4, BUS, LAD)
+
+---
+
+For detailed development guidelines, see [CLAUDE.md](./CLAUDE.md)

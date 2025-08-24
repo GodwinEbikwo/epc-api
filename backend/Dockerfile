@@ -1,20 +1,34 @@
-# Use Node.js LTS
-FROM node:20-alpine
+# ---------- Build stage ----------
+FROM node:20-alpine AS builder
 
-# Set working directory
 WORKDIR /app
 
-# Copy package files
+# Copy package files and install all deps (including dev)
 COPY package*.json ./
-
-# Install dependencies
-RUN npm install --production
+RUN npm install
 
 # Copy source code
 COPY . .
 
-# Expose port
+# Build TypeScript -> dist/
+RUN npm run build
+
+# ---------- Runtime stage ----------
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Copy only package files and install prod deps
+COPY package*.json ./
+RUN npm install --production
+
+# Copy compiled output from builder
+COPY --from=builder /app/dist ./dist
+
+# Copy any non-TS assets (like .env.example, migrations, etc.)
+COPY --from=builder /app/schemas ./schemas
+
 EXPOSE 3001
 
-# Start the app
-CMD ["npm", "start"]
+# Run compiled server
+CMD ["node", "dist/server.js"]
