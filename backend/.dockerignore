@@ -1,4 +1,8 @@
 node_modules
-npm-debug.log
+dist
+.git
+.gitignore
 Dockerfile
-.dockerignore
+tsconfig.json
+*.log
+.env

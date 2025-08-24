@@ -25,9 +25,6 @@ RUN npm install --production
 # Copy compiled output from builder
 COPY --from=builder /app/dist ./dist
 
-# Copy any non-TS assets (like .env.example, migrations, etc.)
-COPY --from=builder /app/schemas ./schemas
-
 EXPOSE 3001
 
 # Run compiled server
