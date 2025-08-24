@@ -62,7 +62,8 @@ export const appRouter = router({
         const params: any[] = [];
 
         if (postcode) {
-          params.push(postcode, postcode + 'Z');
+          const upperPostcode = postcode.toUpperCase();
+          params.push(upperPostcode, upperPostcode + 'Z');
           baseQuery += ` AND postcode >= $${
             params.length - 1
           } AND postcode < $${params.length}`;
@@ -108,7 +109,8 @@ export const appRouter = router({
         const params: any[] = [];
 
         if (postcode) {
-          params.push(postcode, postcode + 'Z');
+          const upperPostcode = postcode.toUpperCase();
+          params.push(upperPostcode, upperPostcode + 'Z');
           query += ` AND postcode >= $${
             params.length - 1
           } AND postcode < $${params.length}`;
@@ -185,7 +187,8 @@ export const appRouter = router({
         let baseQuery = 'FROM certificates_stg WHERE 1=1';
         const params: any[] = [];
 
-        params.push(postcode, postcode + 'Z');
+        const upperPostcode = postcode.toUpperCase();
+        params.push(upperPostcode, upperPostcode + 'Z');
         baseQuery += ` AND postcode >= $${
           params.length - 1
         } AND postcode < $${params.length}`;
