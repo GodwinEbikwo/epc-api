@@ -1,32 +1,22 @@
-# ---------- Build stage ----------
-FROM node:20-alpine AS builder
+# Simple Dockerfile for Coolify
+FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy backend package files
+# Copy package files
 COPY package*.json tsconfig.json ./
 
-# Install deps (including dev)
+# Install all dependencies
 RUN npm install
 
 # Copy source code
 COPY . .
 
-# Build TypeScript -> dist/
+# Build TypeScript
 RUN npm run build
 
-# ---------- Runtime stage ----------
-FROM node:20-alpine
-
-WORKDIR /app
-
-# Copy only package files and install prod deps
-COPY package*.json ./
-RUN npm install --production
-
-# Copy compiled output from builder
-COPY --from=builder /app/dist ./dist
-
+# Expose port
 EXPOSE 3001
 
-CMD ["node", "dist/server.js"]
+# Start the server
+CMD ["npm", "start"]
