@@ -190,19 +190,52 @@ export const appRouter = router({
           LIMIT 10
         `);
 
-        // For now, return hardcoded local government options to avoid timeout
-        // These are common UK local authority and constituency codes
-        const commonLocalAuthorities = [
-          'E06000001', 'E06000002', 'E06000003', 'E06000004', 'E06000005',
-          'E07000001', 'E07000002', 'E07000003', 'E07000004', 'E07000005',
-          'E08000001', 'E08000002', 'E08000003', 'E08000004', 'E08000005'
-        ];
+        // ONS code to readable name mappings
+        const localAuthorityMap = {
+          'E06000001': 'Hartlepool',
+          'E06000002': 'Middlesbrough', 
+          'E06000003': 'Redcar and Cleveland',
+          'E06000004': 'Stockton-on-Tees',
+          'E06000005': 'Darlington',
+          'E07000001': 'Allerdale',
+          'E07000002': 'Barrow-in-Furness',
+          'E07000003': 'Carlisle',
+          'E07000004': 'Copeland',
+          'E07000005': 'Eden',
+          'E08000001': 'Bolton',
+          'E08000002': 'Bury',
+          'E08000003': 'Manchester',
+          'E08000004': 'Oldham',
+          'E08000005': 'Rochdale'
+        };
+
+        const constituencyMap = {
+          'E14000530': 'Aldershot',
+          'E14000531': 'Aldridge-Brownhills',
+          'E14000532': 'Altrincham and Sale West',
+          'E14000533': 'Amber Valley',
+          'E14000534': 'Arundel and South Downs',
+          'E14000535': 'Ashfield',
+          'E14000536': 'Ashford',
+          'E14000537': 'Ashton-under-Lyne',
+          'E14000538': 'Aylesbury',
+          'E14000539': 'Banbury',
+          'E14000540': 'Barking',
+          'E14000541': 'Barnsley Central',
+          'E14000542': 'Barnsley East',
+          'E14000543': 'Barrow and Furness',
+          'E14000544': 'Basildon and Billericay'
+        };
+
+        const commonLocalAuthorities = Object.entries(localAuthorityMap).map(([code, name]) => ({
+          code,
+          name
+        }));
         
-        const commonConstituencies = [
-          'E14000530', 'E14000531', 'E14000532', 'E14000533', 'E14000534',
-          'E14000535', 'E14000536', 'E14000537', 'E14000538', 'E14000539',
-          'E14000540', 'E14000541', 'E14000542', 'E14000543', 'E14000544'
-        ];
+        const commonConstituencies = Object.entries(constituencyMap).map(([code, name]) => ({
+          code, 
+          name
+        }));
 
         return {
           propertyTypes: propertyTypesResult.rows.map(row => row.property_type),
