@@ -178,6 +178,59 @@ export const appRouter = router({
       }),
   }),
 
+  filters: router({
+    getOptions: publicProcedure
+      .query(async () => {
+        // Get distinct property types
+        const propertyTypesResult = await pool.query(`
+          SELECT DISTINCT property_type
+          FROM certificates_stg 
+          WHERE property_type IS NOT NULL 
+          ORDER BY property_type
+          LIMIT 20
+        `);
+
+        // Get distinct local authorities (if column exists)
+        let localAuthorities = [];
+        try {
+          const localAuthResult = await pool.query(`
+            SELECT DISTINCT local_authority
+            FROM certificates_stg 
+            WHERE local_authority IS NOT NULL 
+            ORDER BY local_authority
+            LIMIT 50
+          `);
+          localAuthorities = localAuthResult.rows.map(row => row.local_authority);
+        } catch (error) {
+          // Column doesn't exist, skip
+          console.log('local_authority column not found');
+        }
+
+        // Get distinct constituencies (if column exists)
+        let constituencies = [];
+        try {
+          const constituencyResult = await pool.query(`
+            SELECT DISTINCT constituency
+            FROM certificates_stg 
+            WHERE constituency IS NOT NULL 
+            ORDER BY constituency
+            LIMIT 50
+          `);
+          constituencies = constituencyResult.rows.map(row => row.constituency);
+        } catch (error) {
+          // Column doesn't exist, skip
+          console.log('constituency column not found');
+        }
+
+        return {
+          propertyTypes: propertyTypesResult.rows.map(row => row.property_type),
+          localAuthorities,
+          constituencies,
+          floorAreaRanges: ['unknown', '1-55m²', '55-70m²', '70-85m²', '85-110m²', '110m+']
+        };
+      }),
+  }),
+
   certificates: router({
     getByPostcode: publicProcedure
       .input(certificateSearchSchema)
