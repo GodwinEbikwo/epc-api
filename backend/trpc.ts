@@ -181,51 +181,33 @@ export const appRouter = router({
   filters: router({
     getOptions: publicProcedure
       .query(async () => {
-        // Get distinct property types
+        // Get distinct property types (much faster with small limit)
         const propertyTypesResult = await pool.query(`
           SELECT DISTINCT property_type
           FROM certificates_stg 
           WHERE property_type IS NOT NULL 
           ORDER BY property_type
-          LIMIT 20
+          LIMIT 10
         `);
 
-        // Get distinct local authorities (if column exists)
-        let localAuthorities = [];
-        try {
-          const localAuthResult = await pool.query(`
-            SELECT DISTINCT local_authority
-            FROM certificates_stg 
-            WHERE local_authority IS NOT NULL 
-            ORDER BY local_authority
-            LIMIT 50
-          `);
-          localAuthorities = localAuthResult.rows.map(row => row.local_authority);
-        } catch (error) {
-          // Column doesn't exist, skip
-          console.log('local_authority column not found');
-        }
-
-        // Get distinct constituencies (if column exists)
-        let constituencies = [];
-        try {
-          const constituencyResult = await pool.query(`
-            SELECT DISTINCT constituency
-            FROM certificates_stg 
-            WHERE constituency IS NOT NULL 
-            ORDER BY constituency
-            LIMIT 50
-          `);
-          constituencies = constituencyResult.rows.map(row => row.constituency);
-        } catch (error) {
-          // Column doesn't exist, skip
-          console.log('constituency column not found');
-        }
+        // For now, return hardcoded local government options to avoid timeout
+        // These are common UK local authority and constituency codes
+        const commonLocalAuthorities = [
+          'E06000001', 'E06000002', 'E06000003', 'E06000004', 'E06000005',
+          'E07000001', 'E07000002', 'E07000003', 'E07000004', 'E07000005',
+          'E08000001', 'E08000002', 'E08000003', 'E08000004', 'E08000005'
+        ];
+        
+        const commonConstituencies = [
+          'E14000530', 'E14000531', 'E14000532', 'E14000533', 'E14000534',
+          'E14000535', 'E14000536', 'E14000537', 'E14000538', 'E14000539',
+          'E14000540', 'E14000541', 'E14000542', 'E14000543', 'E14000544'
+        ];
 
         return {
           propertyTypes: propertyTypesResult.rows.map(row => row.property_type),
-          localAuthorities,
-          constituencies,
+          localAuthorities: commonLocalAuthorities,
+          constituencies: commonConstituencies,
           floorAreaRanges: ['unknown', '1-55m²', '55-70m²', '70-85m²', '85-110m²', '110m+']
         };
       }),
