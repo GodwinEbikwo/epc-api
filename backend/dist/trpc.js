@@ -29,7 +29,52 @@ exports.pool = new pg_1.Pool({
     port: Number(process.env.PGPORT),
 });
 exports.pool.on('error', (err) => logger.error('PostgreSQL pool error: %s', err.message));
-/* ---------- 4. Router ---------- */
+/* ---------- 4. Helper for dynamic query building ---------- */
+const floorAreaConditions = {
+    '1-55m²': 'total_floor_area BETWEEN 1 AND 55',
+    '55-70m²': 'total_floor_area BETWEEN 55 AND 70',
+    '70-85m²': 'total_floor_area BETWEEN 70 AND 85',
+    '85-110m²': 'total_floor_area BETWEEN 85 AND 110',
+    '110m+': 'total_floor_area > 110',
+    'unknown': 'total_floor_area IS NULL OR total_floor_area = 0',
+};
+const buildWhereClause = (input) => {
+    const { postcode, rating, fuel, propertyType, localAuthority, constituency, floorArea, uprn, cursor, } = input;
+    const conditions = ['1=1'];
+    const params = [];
+    const addCondition = (clause, ...values) => {
+        params.push(...values);
+        // Adjust parameter placeholders based on the current length of the params array
+        const placeholderClause = clause.replace(/\$(\d)/g, (_, n) => `$${params.length - values.length + parseInt(n)}`);
+        conditions.push(placeholderClause);
+    };
+    if (postcode) {
+        const upperPostcode = postcode.toUpperCase();
+        addCondition('postcode >= $1 AND postcode < $2', upperPostcode, upperPostcode + 'Z');
+    }
+    if (rating)
+        addCondition('current_energy_rating = $1', rating);
+    if (fuel)
+        addCondition('main_fuel ILIKE $1', `%${fuel}%`);
+    if (propertyType && propertyType.length > 0) {
+        const placeholders = propertyType.map((_, i) => `$${i + 1}`).join(', ');
+        addCondition(`property_type IN (${placeholders})`, ...propertyType);
+    }
+    if (localAuthority)
+        addCondition('local_authority = $1', localAuthority);
+    if (constituency)
+        addCondition('constituency = $1', constituency);
+    if (uprn)
+        addCondition('uprn = $1', uprn);
+    if (floorArea && floorAreaConditions[floorArea]) {
+        conditions.push(floorAreaConditions[floorArea]);
+    }
+    // Keyset pagination: fetch records after the cursor
+    if (cursor)
+        addCondition('lmk_key > $1', cursor);
+    return { whereClause: `WHERE ${conditions.join(' AND ')}`, params };
+};
+/* ---------- 5. Router ---------- */
 exports.appRouter = router({
     health: router({
         check: publicProcedure
@@ -41,62 +86,44 @@ exports.appRouter = router({
     }),
     leads: router({
         search: publicProcedure
+            // IMPORTANT: The input schema must accept an optional 'cursor' (string) and not require 'page'
             .input(schemas_1.searchLeadsParamsSchema)
+            // IMPORTANT: The output schema should return 'results' and an optional 'nextCursor' (string)
             .output(schemas_1.searchLeadsResponseSchema)
             .query(async ({ input }) => {
-            const { postcode, rating, fuel, page = 1, pageSize = 50 } = input;
-            let baseQuery = 'FROM certificates_stg WHERE 1=1';
-            const params = [];
-            if (postcode) {
-                params.push(postcode, postcode + 'Z');
-                baseQuery += ` AND postcode >= $${params.length - 1} AND postcode < $${params.length}`;
-            }
-            if (rating) {
-                params.push(rating);
-                baseQuery += ` AND current_energy_rating = $${params.length}`;
-            }
-            if (fuel) {
-                params.push(`%${fuel}%`);
-                baseQuery += ` AND main_fuel ILIKE $${params.length}`;
-            }
+            const { pageSize = 50 } = input;
             const limit = Math.min(pageSize, 100);
-            const offset = (page - 1) * limit;
+            const { whereClause, params } = buildWhereClause(input);
             const dataQuery = `
           SELECT lmk_key, postcode, current_energy_rating, main_fuel
-          ${baseQuery}
-          LIMIT ${limit} OFFSET ${offset}
+          FROM certificates_stg
+          ${whereClause}
+          ORDER BY lmk_key -- Keyset pagination requires a stable, unique order
+          LIMIT ${limit + 1} -- Fetch one extra record to determine if there's a next page
         `;
             const result = await exports.pool.query(dataQuery, params);
-            const countQuery = `SELECT COUNT(*) ${baseQuery}`;
-            const countResult = await exports.pool.query(countQuery, params);
-            const totalCount = parseInt(countResult.rows[0].count, 10);
+            let nextCursor = null;
+            if (result.rows.length > limit) {
+                const lastItem = result.rows.pop(); // Remove the extra record
+                nextCursor = lastItem.lmk_key;
+            }
             return {
-                page,
-                pageSize: limit,
-                totalCount,
-                totalPages: Math.ceil(totalCount / limit),
                 results: result.rows,
+                nextCursor,
             };
         }),
         export: publicProcedure
             .input(schemas_1.exportLeadsParamsSchema)
             .query(async ({ input, ctx }) => {
-            const { postcode, rating, fuel, limit = 100 } = input;
-            let query = 'SELECT lmk_key, postcode, current_energy_rating, main_fuel FROM certificates_stg WHERE 1=1';
-            const params = [];
-            if (postcode) {
-                params.push(postcode, postcode + 'Z');
-                query += ` AND postcode >= $${params.length - 1} AND postcode < $${params.length}`;
-            }
-            if (rating) {
-                params.push(rating);
-                query += ` AND current_energy_rating = $${params.length}`;
-            }
-            if (fuel) {
-                params.push(`%${fuel}%`);
-                query += ` AND main_fuel ILIKE $${params.length}`;
-            }
-            query += ` LIMIT ${Math.min(limit, 10000)}`;
+            const { limit = 1000 } = input;
+            const { whereClause, params } = buildWhereClause(input);
+            const query = `
+        SELECT lmk_key, postcode, current_energy_rating, main_fuel 
+        FROM certificates_stg
+        ${whereClause}
+        ORDER BY lmk_key
+        LIMIT ${Math.min(limit, 10000)}
+      `;
             const result = await exports.pool.query(query, params);
             const parser = new json2csv_1.Parser();
             const csvData = parser.parse(result.rows);
@@ -141,44 +168,49 @@ exports.appRouter = router({
             return { lmk_key, score, current_energy_rating, main_fuel };
         }),
     }),
+    filters: router({
+        getOptions: publicProcedure
+            .query(async () => {
+            // NOTE: These queries can be slow on very large tables without indexes.
+            const [propertyTypesResult, localAuthoritiesResult, constituenciesResult] = await Promise.all([
+                exports.pool.query(`SELECT DISTINCT property_type FROM certificates_stg WHERE property_type IS NOT NULL ORDER BY property_type`),
+                exports.pool.query(`SELECT DISTINCT local_authority FROM certificates_stg WHERE local_authority IS NOT NULL ORDER BY local_authority`),
+                exports.pool.query(`SELECT DISTINCT constituency FROM certificates_stg WHERE constituency IS NOT NULL ORDER BY constituency`),
+            ]);
+            return {
+                propertyTypes: propertyTypesResult.rows.map(row => row.property_type),
+                // NOTE: This returns the authority CODES. The frontend will need a mapping if you want to display friendly names.
+                localAuthorities: localAuthoritiesResult.rows.map(row => row.local_authority),
+                constituencies: constituenciesResult.rows.map(row => row.constituency),
+                floorAreaRanges: ['unknown', '1-55m²', '55-70m²', '70-85m²', '85-110m²', '110m+']
+            };
+        }),
+    }),
     certificates: router({
         getByPostcode: publicProcedure
             .input(schemas_1.certificateSearchSchema)
             .output(schemas_1.certificatesResponseSchema)
             .query(async ({ input }) => {
-            const { postcode, rating, fuel, page = 1, pageSize = 50 } = input;
-            let baseQuery = 'FROM certificates_stg WHERE 1=1';
-            const params = [];
-            params.push(postcode, postcode + 'Z');
-            baseQuery += ` AND postcode >= $${params.length - 1} AND postcode < $${params.length}`;
-            if (rating) {
-                params.push(rating);
-                baseQuery += ` AND current_energy_rating = $${params.length}`;
-            }
-            if (fuel) {
-                params.push(`%${fuel}%`);
-                baseQuery += ` AND main_fuel ILIKE $${params.length}`;
-            }
+            const { pageSize = 50 } = input;
             const limit = Math.min(pageSize, 100);
-            const offset = (page - 1) * limit;
+            const { whereClause, params } = buildWhereClause(input);
             const dataQuery = `
           SELECT lmk_key, postcode, current_energy_rating, main_fuel,
                  property_type, total_floor_area, number_habitable_rooms,
                  construction_age_band, current_energy_efficiency
-          ${baseQuery}
-          ORDER BY postcode
-          LIMIT ${limit} OFFSET ${offset}
+          ${whereClause}
+          ORDER BY lmk_key
+          LIMIT ${limit + 1} 
         `;
             const result = await exports.pool.query(dataQuery, params);
-            const countQuery = `SELECT COUNT(*) ${baseQuery}`;
-            const countResult = await exports.pool.query(countQuery, params);
-            const totalCount = parseInt(countResult.rows[0].count, 10);
+            let nextCursor = null;
+            if (result.rows.length > limit) {
+                const lastItem = result.rows.pop();
+                nextCursor = lastItem.lmk_key;
+            }
             return {
-                page,
-                pageSize: limit,
-                totalCount,
-                totalPages: Math.ceil(totalCount / limit),
                 certificates: result.rows,
+                nextCursor,
             };
         }),
     }),

@@ -18,7 +18,12 @@ const app = (0, express_1.default)();
 const port = process.env.PORT ? Number(process.env.PORT) : 3001;
 /* ---------- Middleware ---------- */
 app.use((0, pino_http_1.default)({ logger }));
-app.use((0, cors_1.default)());
+app.use((0, cors_1.default)({
+    origin: '*',
+    credentials: false,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'trpc-accept', 'Accept', 'X-Requested-With']
+}));
 app.use((0, helmet_1.default)());
 app.use((0, compression_1.default)());
 app.use(express_1.default.json());
