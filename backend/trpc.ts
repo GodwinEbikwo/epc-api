@@ -41,7 +41,55 @@ pool.on('error', (err) =>
   logger.error('PostgreSQL pool error: %s', err.message)
 );
 
-/* ---------- 4. Router ---------- */
+/* ---------- 4. Helper for dynamic query building ---------- */
+const floorAreaConditions: Record<string, string> = {
+  '1-55m²': 'total_floor_area BETWEEN 1 AND 55',
+  '55-70m²': 'total_floor_area BETWEEN 55 AND 70',
+  '70-85m²': 'total_floor_area BETWEEN 70 AND 85',
+  '85-110m²': 'total_floor_area BETWEEN 85 AND 110',
+  '110m+': 'total_floor_area > 110',
+  'unknown': 'total_floor_area IS NULL OR total_floor_area = 0',
+};
+
+const buildWhereClause = (input: any) => {
+  const {
+    postcode, rating, fuel, propertyType, localAuthority,
+    constituency, floorArea, uprn, cursor,
+  } = input;
+
+  const conditions: string[] = ['1=1'];
+  const params: any[] = [];
+
+  const addCondition = (clause: string, ...values: any[]) => {
+    params.push(...values);
+    // Adjust parameter placeholders based on the current length of the params array
+    const placeholderClause = clause.replace(/\$(\d)/g, (_, n) => `$${params.length - values.length + parseInt(n)}`);
+    conditions.push(placeholderClause);
+  };
+
+  if (postcode) {
+    const upperPostcode = postcode.toUpperCase();
+    addCondition('postcode >= $1 AND postcode < $2', upperPostcode, upperPostcode + 'Z');
+  }
+  if (rating) addCondition('current_energy_rating = $1', rating);
+  if (fuel) addCondition('main_fuel ILIKE $1', `%${fuel}%`);
+  if (propertyType && propertyType.length > 0) {
+    const placeholders: string = propertyType.map((_: string, i: number) => `$${i + 1}`).join(', ');
+    addCondition(`property_type IN (${placeholders})`, ...propertyType);
+  }
+  if (localAuthority) addCondition('local_authority = $1', localAuthority);
+  if (constituency) addCondition('constituency = $1', constituency);
+  if (uprn) addCondition('uprn = $1', uprn);
+  if (floorArea && floorAreaConditions[floorArea]) {
+    conditions.push(floorAreaConditions[floorArea]);
+  }
+  // Keyset pagination: fetch records after the cursor
+  if (cursor) addCondition('lmk_key > $1', cursor);
+
+  return { whereClause: `WHERE ${conditions.join(' AND ')}`, params };
+};
+
+/* ---------- 5. Router ---------- */
 export const appRouter = router({
   health: router({
     check: publicProcedure
@@ -52,90 +100,62 @@ export const appRouter = router({
       })),
   }),
 
-  leads: router({
-    search: publicProcedure
+ leads: router({
+   search: publicProcedure
+      // IMPORTANT: The input schema must accept an optional 'cursor' (string) and not require 'page'
       .input(searchLeadsParamsSchema)
+      // IMPORTANT: The output schema should return 'results' and an optional 'nextCursor' (string)
       .output(searchLeadsResponseSchema)
       .query(async ({ input }) => {
-        const { postcode, rating, fuel, page = 1, pageSize = 50 } = input;
-        let baseQuery = 'FROM certificates_stg WHERE 1=1';
-        const params: any[] = [];
-
-        if (postcode) {
-          const upperPostcode = postcode.toUpperCase();
-          params.push(upperPostcode, upperPostcode + 'Z');
-          baseQuery += ` AND postcode >= $${
-            params.length - 1
-          } AND postcode < $${params.length}`;
-        }
-        if (rating) {
-          params.push(rating);
-          baseQuery += ` AND current_energy_rating = $${params.length}`;
-        }
-        if (fuel) {
-          params.push(`%${fuel}%`);
-          baseQuery += ` AND main_fuel ILIKE $${params.length}`;
-        }
-
+        const { pageSize = 50 } = input;
         const limit = Math.min(pageSize, 100);
-        const offset = (page - 1) * limit;
+
+        const { whereClause, params } = buildWhereClause(input);
 
         const dataQuery = `
           SELECT lmk_key, postcode, current_energy_rating, main_fuel
-          ${baseQuery}
-          LIMIT ${limit} OFFSET ${offset}
+          FROM certificates_stg
+          ${whereClause}
+          ORDER BY lmk_key -- Keyset pagination requires a stable, unique order
+          LIMIT ${limit + 1} -- Fetch one extra record to determine if there's a next page
         `;
         const result = await pool.query(dataQuery, params);
 
-        const countQuery = `SELECT COUNT(*) ${baseQuery}`;
-        const countResult = await pool.query(countQuery, params);
-        const totalCount = parseInt(countResult.rows[0].count, 10);
+        let nextCursor: string | null = null;
+        if (result.rows.length > limit) {
+          const lastItem = result.rows.pop(); // Remove the extra record
+          nextCursor = lastItem.lmk_key;
+        }
 
         return {
-          page,
-          pageSize: limit,
-          totalCount,
-          totalPages: Math.ceil(totalCount / limit),
           results: result.rows,
+          nextCursor,
         };
       }),
 
-    export: publicProcedure
-      .input(exportLeadsParamsSchema)
-      .query(async ({ input, ctx }) => {
-        const { postcode, rating, fuel, limit = 100 } = input;
-        let query =
-          'SELECT lmk_key, postcode, current_energy_rating, main_fuel FROM certificates_stg WHERE 1=1';
-        const params: any[] = [];
+  export: publicProcedure
+    .input(exportLeadsParamsSchema)
+    .query(async ({ input, ctx }) => {
+      const { limit = 1000 } = input;
+      const { whereClause, params } = buildWhereClause(input);
 
-        if (postcode) {
-          const upperPostcode = postcode.toUpperCase();
-          params.push(upperPostcode, upperPostcode + 'Z');
-          query += ` AND postcode >= $${
-            params.length - 1
-          } AND postcode < $${params.length}`;
-        }
-        if (rating) {
-          params.push(rating);
-          query += ` AND current_energy_rating = $${params.length}`;
-        }
-        if (fuel) {
-          params.push(`%${fuel}%`);
-          query += ` AND main_fuel ILIKE $${params.length}`;
-        }
+      const query = `
+        SELECT lmk_key, postcode, current_energy_rating, main_fuel 
+        FROM certificates_stg
+        ${whereClause}
+        ORDER BY lmk_key
+        LIMIT ${Math.min(limit, 10000)}
+      `;
 
-        query += ` LIMIT ${Math.min(limit, 10000)}`;
+      const result = await pool.query(query, params);
+      const parser = new Parser();
+      const csvData = parser.parse(result.rows);
 
-        const result = await pool.query(query, params);
-        const parser = new Parser();
-        const csvData = parser.parse(result.rows);
-
-        ctx.res.header('Content-Type', 'text/csv');
-        ctx.res.attachment('leads.csv');
-
-        return csvData;
+      ctx.res.header('Content-Type', 'text/csv');
+      ctx.res.attachment('leads.csv');
+      return csvData;
       }),
-  }),
+    }),
 
   stats: router({
     market: publicProcedure
@@ -166,7 +186,6 @@ export const appRouter = router({
         );
 
         if (result.rows.length === 0) throw new Error('Property not found');
-
         const { current_energy_rating, main_fuel } = result.rows[0];
         let score = 0;
 
@@ -181,66 +200,18 @@ export const appRouter = router({
   filters: router({
     getOptions: publicProcedure
       .query(async () => {
-        // Get distinct property types (much faster with small limit)
-        const propertyTypesResult = await pool.query(`
-          SELECT DISTINCT property_type
-          FROM certificates_stg 
-          WHERE property_type IS NOT NULL 
-          ORDER BY property_type
-          LIMIT 10
-        `);
-
-        // ONS code to readable name mappings
-        const localAuthorityMap = {
-          'E06000001': 'Hartlepool',
-          'E06000002': 'Middlesbrough', 
-          'E06000003': 'Redcar and Cleveland',
-          'E06000004': 'Stockton-on-Tees',
-          'E06000005': 'Darlington',
-          'E07000001': 'Allerdale',
-          'E07000002': 'Barrow-in-Furness',
-          'E07000003': 'Carlisle',
-          'E07000004': 'Copeland',
-          'E07000005': 'Eden',
-          'E08000001': 'Bolton',
-          'E08000002': 'Bury',
-          'E08000003': 'Manchester',
-          'E08000004': 'Oldham',
-          'E08000005': 'Rochdale'
-        };
-
-        const constituencyMap = {
-          'E14000530': 'Aldershot',
-          'E14000531': 'Aldridge-Brownhills',
-          'E14000532': 'Altrincham and Sale West',
-          'E14000533': 'Amber Valley',
-          'E14000534': 'Arundel and South Downs',
-          'E14000535': 'Ashfield',
-          'E14000536': 'Ashford',
-          'E14000537': 'Ashton-under-Lyne',
-          'E14000538': 'Aylesbury',
-          'E14000539': 'Banbury',
-          'E14000540': 'Barking',
-          'E14000541': 'Barnsley Central',
-          'E14000542': 'Barnsley East',
-          'E14000543': 'Barrow and Furness',
-          'E14000544': 'Basildon and Billericay'
-        };
-
-        const commonLocalAuthorities = Object.entries(localAuthorityMap).map(([code, name]) => ({
-          code,
-          name
-        }));
-        
-        const commonConstituencies = Object.entries(constituencyMap).map(([code, name]) => ({
-          code, 
-          name
-        }));
+        // NOTE: These queries can be slow on very large tables without indexes.
+        const [propertyTypesResult, localAuthoritiesResult, constituenciesResult] = await Promise.all([
+            pool.query(`SELECT DISTINCT property_type FROM certificates_stg WHERE property_type IS NOT NULL ORDER BY property_type`),
+            pool.query(`SELECT DISTINCT local_authority FROM certificates_stg WHERE local_authority IS NOT NULL ORDER BY local_authority`),
+            pool.query(`SELECT DISTINCT constituency FROM certificates_stg WHERE constituency IS NOT NULL ORDER BY constituency`),
+        ]);
 
         return {
           propertyTypes: propertyTypesResult.rows.map(row => row.property_type),
-          localAuthorities: commonLocalAuthorities,
-          constituencies: commonConstituencies,
+          // NOTE: This returns the authority CODES. The frontend will need a mapping if you want to display friendly names.
+          localAuthorities: localAuthoritiesResult.rows.map(row => row.local_authority),
+          constituencies: constituenciesResult.rows.map(row => row.constituency),
           floorAreaRanges: ['unknown', '1-55m²', '55-70m²', '70-85m²', '85-110m²', '110m+']
         };
       }),
@@ -251,48 +222,29 @@ export const appRouter = router({
       .input(certificateSearchSchema)
       .output(certificatesResponseSchema)
       .query(async ({ input }) => {
-        const { postcode, rating, fuel, page = 1, pageSize = 50 } = input;
-        let baseQuery = 'FROM certificates_stg WHERE 1=1';
-        const params: any[] = [];
-
-        const upperPostcode = postcode.toUpperCase();
-        params.push(upperPostcode, upperPostcode + 'Z');
-        baseQuery += ` AND postcode >= $${
-          params.length - 1
-        } AND postcode < $${params.length}`;
-
-        if (rating) {
-          params.push(rating);
-          baseQuery += ` AND current_energy_rating = $${params.length}`;
-        }
-        if (fuel) {
-          params.push(`%${fuel}%`);
-          baseQuery += ` AND main_fuel ILIKE $${params.length}`;
-        }
-
+        const { pageSize = 50 } = input;
         const limit = Math.min(pageSize, 100);
-        const offset = (page - 1) * limit;
+
+        const { whereClause, params } = buildWhereClause(input);
 
         const dataQuery = `
           SELECT lmk_key, postcode, current_energy_rating, main_fuel,
                  property_type, total_floor_area, number_habitable_rooms,
                  construction_age_band, current_energy_efficiency
-          ${baseQuery}
-          ORDER BY postcode
-          LIMIT ${limit} OFFSET ${offset}
+          ${whereClause}
+          ORDER BY lmk_key
+          LIMIT ${limit + 1} 
         `;
         const result = await pool.query(dataQuery, params);
+        let nextCursor: string | null = null;
 
-        const countQuery = `SELECT COUNT(*) ${baseQuery}`;
-        const countResult = await pool.query(countQuery, params);
-        const totalCount = parseInt(countResult.rows[0].count, 10);
-
+        if (result.rows.length > limit) {
+          const lastItem = result.rows.pop();
+          nextCursor = lastItem.lmk_key;
+        }
         return {
-          page,
-          pageSize: limit,
-          totalCount,
-          totalPages: Math.ceil(totalCount / limit),
           certificates: result.rows,
+          nextCursor,
         };
       }),
   }),

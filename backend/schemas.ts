@@ -4,7 +4,12 @@ const searchLeadsParamsSchema = z.object({
   postcode: z.string().optional(),
   rating: z.enum(['A', 'B', 'C', 'D', 'E', 'F', 'G']).optional(),
   fuel: z.enum(['mains gas (not community)', 'electricity', 'oil', 'LPG', 'solid fuel']).optional(),
-  page: z.number().min(1).default(1),
+  propertyType: z.array(z.string()).optional(),
+  localAuthority: z.string().optional(),
+  constituency: z.string().optional(),
+  floorArea: z.string().optional(),
+  uprn: z.string().optional(),
+  cursor: z.string().nullish(),
   pageSize: z.number().min(1).max(100).default(50),
 });
 
@@ -21,7 +26,7 @@ const exportLeadsParamsSchema = z.object({
 
 const certificateSearchSchema = z.object({
   postcode: z.string().min(1, 'Postcode is required'),
-  page: z.number().min(1).default(1),
+  cursor: z.string().nullish(),
   pageSize: z.number().min(1).max(100).default(50),
   rating: z.enum(['A', 'B', 'C', 'D', 'E', 'F', 'G']).optional(),
   fuel: z.enum(['mains gas (not community)', 'electricity', 'oil', 'LPG', 'solid fuel']).optional(),
@@ -48,25 +53,19 @@ const certificateSchema = z.object({
 });
 
 const searchLeadsResponseSchema = z.object({
-  page: z.number(),
-  pageSize: z.number(),
-  totalCount: z.number(),
-  totalPages: z.number(),
+  nextCursor: z.string().nullish(), 
   results: z.array(leadSchema),
 });
 
 const certificatesResponseSchema = z.object({
-  page: z.number(),
-  pageSize: z.number(),
-  totalCount: z.number(),
-  totalPages: z.number(),
+  nextCursor: z.string().nullish(),
   certificates: z.array(certificateSchema),
 });
 
 const marketStatsSchema = z.array(z.object({
   postcode_prefix: z.string(),
   current_energy_rating: z.string(),
-  count: z.string(), // PostgreSQL COUNT returns string
+  count: z.string(),  // PostgreSQL COUNT returns string
 }));
 
 const propertyScoreResponseSchema = z.object({

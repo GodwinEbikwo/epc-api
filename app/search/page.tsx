@@ -2,153 +2,146 @@
 
 import { trpc } from '@/lib/trpc';
 import { useSearchParams } from '@/lib/search-params';
+import { useDebouncedSearch } from '@/lib/use-debounced-search';
 import {
   ENERGY_RATINGS,
   FUEL_TYPES,
+  PROPERTY_TYPES,
   ENERGY_RATING_LABELS,
   FUEL_TYPE_LABELS,
+  PROPERTY_TYPE_LABELS,
   DEFAULT_PAGE_SIZE,
   type EnergyRating,
-  type FuelType
+  type FuelType,
+  type PropertyType
 } from '@/lib/constants';
+import { PropertyListSkeleton } from '@/components/property-card-skeleton';
+import { EmptyState } from '@/components/empty-state';
+import { ErrorState } from '@/components/error-state';
+import { SearchFilters } from '@/components/search-filters';
 
 export default function SearchPage() {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [nuqsParams, setNuqsParams] = useSearchParams();
 
-  // Use tRPC query with nuqs params
-  const { data, isLoading, error } = trpc.leads.search.useQuery({
-    postcode: searchParams.postcode || undefined,
-    rating: searchParams.rating ? (searchParams.rating as EnergyRating) : undefined,
-    fuel: searchParams.fuel ? (searchParams.fuel as FuelType) : undefined,
-    page: searchParams.page,
+  // Use debounced search for better UX
+  const { searchParams, debouncedParams, setSearchParams } = useDebouncedSearch(nuqsParams);
+
+
+  const hasSearchCriteria = !!(
+    debouncedParams.postcode || 
+    debouncedParams.rating || 
+    debouncedParams.fuel ||
+    debouncedParams.propertyType?.length ||
+    debouncedParams.localAuthority ||
+    debouncedParams.constituency ||
+    debouncedParams.floorArea ||
+    debouncedParams.uprn
+  );
+
+  // Use tRPC query with debounced params to avoid excessive API calls
+  const { data, isLoading, error, refetch, isRefetching } = trpc.leads.search.useQuery({
+    postcode: debouncedParams.postcode || undefined,
+    rating: debouncedParams.rating ? (debouncedParams.rating as EnergyRating) : undefined,
+    fuel: debouncedParams.fuel ? (debouncedParams.fuel as FuelType) : undefined,
+    propertyType: debouncedParams.propertyType?.length ? debouncedParams.propertyType : undefined,
+    localAuthority: debouncedParams.localAuthority || undefined,
+    constituency: debouncedParams.constituency || undefined,
+    floorArea: debouncedParams.floorArea || undefined,
+    uprn: debouncedParams.uprn || undefined,
+    cursor: null,
     pageSize: DEFAULT_PAGE_SIZE,
   }, {
-    enabled: !!searchParams.postcode || !!searchParams.rating || !!searchParams.fuel,
+    enabled: hasSearchCriteria,
+    retry: 2,
+    retryDelay: 1000,
   });
 
+  const getCurrentSearchQuery = () => {
+    const parts = [];
+    if (debouncedParams.postcode) parts.push(debouncedParams.postcode);
+    if (debouncedParams.rating) parts.push(`${ENERGY_RATING_LABELS[debouncedParams.rating as EnergyRating]} rating`);
+    if (debouncedParams.fuel) parts.push(`${FUEL_TYPE_LABELS[debouncedParams.fuel as FuelType]} fuel`);
+    return parts.join(', ');
+  };
+
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-6">Property Search</h1>
-
-      {/* Search Form */}
-      <div className="mb-6 space-y-4">
-        <div>
-          <label className="block text-sm font-medium mb-1">Postcode</label>
-          <input
-            type="text"
-            value={searchParams.postcode}
-            onChange={(e) => setSearchParams({ postcode: e.target.value, page: 1 })}
-            placeholder="e.g. SW1A 1AA (be specific for faster results)"
-            className="border rounded px-3 py-2 w-full max-w-xs"
-          />
-          <p className="text-xs text-gray-500 mt-1">
-            💡 Tip: Use full postcodes (e.g. SW1A 1AA) for faster results than prefixes (e.g. SW)
-          </p>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium mb-1">Energy Rating</label>
-          <select
-            value={searchParams.rating}
-            onChange={(e) => setSearchParams({ rating: e.target.value, page: 1 })}
-            className="border rounded px-3 py-2 w-full max-w-xs"
-          >
-            <option value="">All Ratings</option>
-            {ENERGY_RATINGS.map((rating) => (
-              <option key={rating} value={rating}>
-                {ENERGY_RATING_LABELS[rating]}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium mb-1">Fuel Type</label>
-          <select
-            value={searchParams.fuel}
-            onChange={(e) => setSearchParams({ fuel: e.target.value, page: 1 })}
-            className="border rounded px-3 py-2 w-full max-w-xs"
-          >
-            <option value="">All Fuel Types</option>
-            {FUEL_TYPES.map((fuel) => (
-              <option key={fuel} value={fuel}>
-                {FUEL_TYPE_LABELS[fuel]}
-              </option>
-            ))}
-          </select>
-        </div>
+    <div className="flex min-h-screen bg-background">
+      {/* Left Sidebar - Filters */}
+      <div className="w-80">
+        <SearchFilters 
+          searchParams={searchParams}
+          onParamsChange={(params) => {
+            setSearchParams(params);
+            setNuqsParams(params);
+          }}
+        />
       </div>
 
-      {/* Results */}
-      {isLoading && (
-        <div className="flex items-center gap-2">
-          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
-          <span>Searching properties... This may take a few seconds for large areas.</span>
+      {/* Main Content */}
+      <div className="flex-1 p-6 bg-card">
+        <h1 className="text-2xl font-bold mb-6 text-foreground">Search Results</h1>
+
+        {/* Results */}
+      {!hasSearchCriteria && (
+        <EmptyState type="no-search" />
+      )}
+
+      {hasSearchCriteria && isLoading && (
+        <div className="space-y-6">
+          <div className="flex items-center gap-2 text-blue-600">
+            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+            <span className="text-sm">
+              Searching properties... This may take a few seconds for large areas.
+            </span>
+          </div>
+          <PropertyListSkeleton />
         </div>
       )}
 
-      {error && (
-        <div className="text-red-600">
-          Error: {error.message}
-        </div>
+      {hasSearchCriteria && error && (
+        <ErrorState
+          error={error}
+          onRetry={() => refetch()}
+          isRetrying={isRefetching}
+        />
       )}
 
-      {data && (
+      {hasSearchCriteria && data && data.results.length === 0 && (
+        <EmptyState
+          type="no-results"
+          searchQuery={getCurrentSearchQuery()}
+        />
+      )}
+
+      {data && data.results.length > 0 && (
         <div>
           <div className="mb-4">
             <p className="text-sm text-gray-600">
-              Page {data.page} of {data.totalPages}
-              ({data.totalCount.toLocaleString()} total results)
+              Showing {data.results.length} results
+              {data.nextCursor && ' (more available)'}
             </p>
           </div>
 
           <div className="grid gap-4">
             {data.results.map((property: any) => (
               <div key={property.lmk_key} className="border rounded p-4">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
-                  <div>
+                <ul className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+                  <li>
                     <span className="font-medium">Postcode:</span> {property.postcode}
-                  </div>
-                  <div>
+                  </li>
+                  <li>
                     <span className="font-medium">Rating:</span> {property.current_energy_rating}
-                  </div>
-                  <div>
+                  </li>
+                  <li>
                     <span className="font-medium">Fuel:</span> {property.main_fuel}
-                  </div>
-                  <div>
-                    <span className="font-medium">Key:</span> {property.lmk_key}
-                  </div>
-                </div>
+                  </li>
+                </ul>
               </div>
             ))}
           </div>
-
-          {/* Pagination */}
-          {data.totalPages > 1 && (
-            <div className="flex gap-2 mt-6">
-              <button
-                disabled={data.page <= 1}
-                onClick={() => setSearchParams({ page: data.page - 1 })}
-                className="px-3 py-1 border rounded disabled:opacity-50"
-              >
-                Previous
-              </button>
-
-              <span className="px-3 py-1">
-                Page {data.page} of {data.totalPages}
-              </span>
-
-              <button
-                disabled={data.page >= data.totalPages}
-                onClick={() => setSearchParams({ page: data.page + 1 })}
-                className="px-3 py-1 border rounded disabled:opacity-50"
-              >
-                Next
-              </button>
-            </div>
-          )}
         </div>
       )}
+      </div>
     </div>
   );
 }
