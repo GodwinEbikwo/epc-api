@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { trpc } from '@/lib/trpc';
 import { useSearchParams } from '@/lib/search-params';
 import { useDebouncedSearch } from '@/lib/use-debounced-search';
@@ -15,16 +16,21 @@ import {
   type FuelType,
   type PropertyType
 } from '@/lib/constants';
-import { PropertyListSkeleton } from '@/components/property-card-skeleton';
 import { EmptyState } from '@/components/empty-state';
 import { ErrorState } from '@/components/error-state';
 import { SearchFilters } from '@/components/search-filters';
+import { Button } from '@/components/ui/button';
 
 export default function SearchPage() {
   const [nuqsParams, setNuqsParams] = useSearchParams();
 
   // Use debounced search for better UX
   const { searchParams, debouncedParams, setSearchParams } = useDebouncedSearch(nuqsParams);
+
+  // State for cursor-based pagination
+  const [allResults, setAllResults] = useState<any[]>([]);
+  const [currentCursor, setCurrentCursor] = useState<string | null>(null);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
 
 
   const hasSearchCriteria = !!(
@@ -55,6 +61,63 @@ export default function SearchPage() {
     retry: 2,
     retryDelay: 1000,
   });
+
+  // Load more results query - disabled by default, enabled manually
+  const loadMoreQuery = trpc.leads.search.useQuery({
+    postcode: debouncedParams.postcode || undefined,
+    rating: debouncedParams.rating ? (debouncedParams.rating as EnergyRating) : undefined,
+    fuel: debouncedParams.fuel ? (debouncedParams.fuel as FuelType) : undefined,
+    propertyType: debouncedParams.propertyType?.length ? debouncedParams.propertyType : undefined,
+    localAuthority: debouncedParams.localAuthority || undefined,
+    constituency: debouncedParams.constituency || undefined,
+    floorArea: debouncedParams.floorArea || undefined,
+    uprn: debouncedParams.uprn || undefined,
+    cursor: currentCursor,
+    pageSize: DEFAULT_PAGE_SIZE,
+  }, {
+    enabled: false, // Only run when manually triggered
+    retry: 2,
+    retryDelay: 1000,
+  });
+
+  // Reset accumulated results when search criteria changes
+  useEffect(() => {
+    if (data) {
+      setAllResults(data.results);
+      setCurrentCursor(data.nextCursor || null);
+    }
+  }, [data]);
+
+  // Handle load more results
+  useEffect(() => {
+    if (loadMoreQuery.data && currentCursor) {
+      setAllResults(prev => [...prev, ...loadMoreQuery.data.results]);
+      setCurrentCursor(loadMoreQuery.data.nextCursor || null);
+      setIsLoadingMore(false);
+    }
+  }, [loadMoreQuery.data, currentCursor]);
+
+  // Clear results when search criteria changes
+  useEffect(() => {
+    setAllResults([]);
+    setCurrentCursor(null);
+  }, [
+    debouncedParams.postcode,
+    debouncedParams.rating,
+    debouncedParams.fuel,
+    debouncedParams.propertyType,
+    debouncedParams.localAuthority,
+    debouncedParams.constituency,
+    debouncedParams.floorArea,
+    debouncedParams.uprn,
+  ]);
+
+  const handleLoadMore = () => {
+    if (currentCursor && !isLoadingMore) {
+      setIsLoadingMore(true);
+      loadMoreQuery.refetch();
+    }
+  };
 
   const getCurrentSearchQuery = () => {
     const parts = [];
@@ -94,7 +157,18 @@ export default function SearchPage() {
               Searching properties... This may take a few seconds for large areas.
             </span>
           </div>
-          <PropertyListSkeleton />
+          <div className="space-y-4">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="border rounded p-4 animate-pulse">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  <div className="h-4 bg-gray-200 rounded"></div>
+                  <div className="h-4 bg-gray-200 rounded"></div>
+                  <div className="h-4 bg-gray-200 rounded"></div>
+                  <div className="h-4 bg-gray-200 rounded"></div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -106,24 +180,24 @@ export default function SearchPage() {
         />
       )}
 
-      {hasSearchCriteria && data && data.results.length === 0 && (
+      {hasSearchCriteria && allResults.length === 0 && !isLoading && (
         <EmptyState
           type="no-results"
           searchQuery={getCurrentSearchQuery()}
         />
       )}
 
-      {data && data.results.length > 0 && (
+      {allResults.length > 0 && (
         <div>
           <div className="mb-4">
             <p className="text-sm text-gray-600">
-              Showing {data.results.length} results
-              {data.nextCursor && ' (more available)'}
+              Showing {allResults.length} results
+              {currentCursor && ' (more available)'}
             </p>
           </div>
 
           <div className="grid gap-4">
-            {data.results.map((property: any) => (
+            {allResults.map((property: any) => (
               <div key={property.lmk_key} className="border rounded p-4">
                 <ul className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
                   <li>
@@ -139,6 +213,33 @@ export default function SearchPage() {
               </div>
             ))}
           </div>
+
+          {/* Load More Button */}
+          {currentCursor && (
+            <div className="mt-6 flex justify-center">
+              <Button
+                onClick={handleLoadMore}
+                disabled={isLoadingMore}
+                variant="outline"
+                size="lg"
+              >
+                {isLoadingMore ? (
+                  <div className="flex items-center gap-2">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
+                    Loading more...
+                  </div>
+                ) : (
+                  'Load More Results'
+                )}
+              </Button>
+            </div>
+          )}
+
+          {!currentCursor && allResults.length > 0 && (
+            <div className="mt-6 text-center text-gray-500 text-sm">
+              No more results available
+            </div>
+          )}
         </div>
       )}
       </div>
