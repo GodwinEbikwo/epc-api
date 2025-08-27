@@ -27,5 +27,5 @@ COPY init-pgai.js ./
 # Expose port
 EXPOSE 3001
 
-# Start the server
-CMD ["npm", "start"]
+# Start the server with pgai initialization
+CMD ["sh", "-c", "node init-pgai.js || echo 'pgai initialization skipped' && npm start"]
