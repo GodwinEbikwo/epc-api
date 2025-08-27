@@ -401,8 +401,19 @@ export const appRouter = router({
     healthCheck: publicProcedure
       .query(async () => {
         try {
-          // Test pgai extension
-          const aiCheck = await pool.query(`SELECT test_pgai_installation() as status`);
+          // Test if pgai schema exists (better than test_pgai_installation function)
+          let pgaiStatus = 'not_installed';
+          try {
+            const schemaCheck = await pool.query(`
+              SELECT EXISTS (
+                SELECT FROM information_schema.schemata 
+                WHERE schema_name = 'ai'
+              ) as exists;
+            `);
+            pgaiStatus = schemaCheck.rows[0]?.exists ? 'installed' : 'not_installed';
+          } catch {
+            pgaiStatus = 'error';
+          }
           
           // Test Ollama connection (this will fail gracefully if Ollama isn't ready)
           let ollamaStatus = 'not_ready';
@@ -414,9 +425,9 @@ export const appRouter = router({
           }
           
           return {
-            pgai_status: aiCheck.rows[0]?.status || 'unknown',
+            pgai_status: pgaiStatus,
             ollama_status: ollamaStatus,
-            embeddings_ready: ollamaStatus === 'ready',
+            embeddings_ready: pgaiStatus === 'installed' && ollamaStatus === 'ready',
             timestamp: new Date().toISOString(),
           };
         } catch (error) {
