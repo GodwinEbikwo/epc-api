@@ -1,55 +1,23 @@
 version: "3.9"
 
 services:
-  postgres:
-    image: timescale/timescaledb-ha:pg17
-    container_name: coolify-db
+  # Main API Service - This will be built by Coolify
+  app:
+    build: .
     restart: always
     environment:
-      POSTGRES_USER: epc_user
-      POSTGRES_PASSWORD: 080godwin.com
-      POSTGRES_DB: epcdb
-      # PostgreSQL configuration for AI workloads
-      POSTGRES_INITDB_ARGS: "--max-connections=200 --shared-buffers=8GB --work-mem=256MB"
-    volumes:
-      - coolify-db:/home/postgres/pgdata/data
-      - ./init-pgai.sql:/docker-entrypoint-initdb.d/001-init-pgai.sql
-      - ./init-ollama.sh:/docker-entrypoint-initdb.d/002-init-ollama.sh
-    command: >
-      postgres 
-      -c max_connections=200
-      -c shared_buffers=8GB
-      -c effective_cache_size=24GB
-      -c work_mem=256MB
-      -c maintenance_work_mem=2GB
-    networks:
-      - epc-net
-      - coolify
-
-  ollama:
-    image: ollama/ollama:latest
-    container_name: ollama-service
-    restart: always
-    volumes:
-      - ollama-data:/root/.ollama
-    environment:
-      - OLLAMA_HOST=0.0.0.0:11434
-    networks:
-      - epc-net
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/version"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  epc-api:
-    image: epc-api:latest
-    container_name: epc-api
-    restart: always
-    env_file:
-      - .env
+      NODE_ENV: production
+      PORT: 3001
+      # Database connection to existing Coolify database
+      PGHOST: ${DATABASE_HOST:-coolify-db}
+      PGPORT: ${DATABASE_PORT:-5432}
+      PGDATABASE: ${DATABASE_NAME:-epcdb}
+      PGUSER: ${DATABASE_USER:-epc_user}
+      PGPASSWORD: ${DATABASE_PASSWORD}
+      # Ollama connection
+      OLLAMA_HOST: ollama:11434
     depends_on:
-      - postgres
+      - ollama
     ports:
       - "3001:3001"
     labels:
@@ -61,18 +29,42 @@ services:
       - "traefik.http.routers.epc-api-https.tls.certresolver=letsencrypt"
       - "traefik.http.services.epc-api.loadbalancer.server.port=3001"
     networks:
-      - epc-net
+      - default
       - coolify
+    # Initialize pgai on startup
+    command: >
+      sh -c "
+        node init-pgai.js || echo 'pgai initialization skipped' &&
+        npm start
+      "
+
+  # Ollama service for local embeddings (no API costs!)
+  ollama:
+    image: ollama/ollama:latest
+    restart: always
+    volumes:
+      - ollama-data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:11434/api/version || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    # Auto-pull the embedding model on startup
+    command: >
+      bash -c "
+        ollama serve &
+        sleep 30 &&
+        ollama pull nomic-embed-text &&
+        wait
+      "
 
 volumes:
-  coolify-db:
-    external: true
   ollama-data:
-    external: false
 
 networks:
-  epc-net:
-    external: false
   coolify:
     external: true
   

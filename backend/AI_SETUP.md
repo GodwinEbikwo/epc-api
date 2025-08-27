@@ -6,16 +6,16 @@ Your backend now includes AI-powered semantic search using pgai + Ollama (local 
 
 ### What Was Added
 
-1. **TimescaleDB + pgai**: Upgraded from PostgreSQL 15 to TimescaleDB with AI extensions
+1. **pgai Extension**: Added to your existing PostgreSQL 15 database (no migration needed!)
 2. **Ollama Service**: Local embedding generation (no API costs)  
 3. **AI API Endpoints**: New tRPC routes for semantic search
 
 ### 🐳 Docker Setup
 
 The `docker-compose.yml` now includes:
-- **TimescaleDB container** with pgai extensions
+- **Uses your existing PostgreSQL database** (coolify-db)
+- **pgai extension** automatically installed on startup
 - **Ollama container** for local embeddings
-- **Automatic initialization** via SQL + shell scripts
 
 ### 📡 New API Endpoints
 
@@ -63,17 +63,17 @@ git push
 
 ### 2. Deploy via Coolify
 - Coolify will rebuild containers using new docker-compose.yml
-- TimescaleDB + pgai will initialize automatically
+- pgai will install automatically into your existing database
 - Ollama will download the embedding model (~2-3GB)
 
 ### 3. Verify Installation (SSH)
 ```bash
-# Access your container
+# Access your existing database
 ssh your-server
 docker exec -it coolify-db psql -U epc_user -d epcdb
 
-# Test pgai installation
-SELECT test_pgai_installation();
+# Check pgai installation (should show 'ai' schema)
+\dn
 
 # Test Ollama embedding
 SELECT ai.ollama_embed('nomic-embed-text', 'test property description');
@@ -102,13 +102,14 @@ SELECT ai.create_vectorizer(
 
 ### Zero API Costs
 - **Ollama runs locally** = no OpenAI/API fees
+- **Uses existing PostgreSQL** = no data migration
 - **Test with £0 budget** = perfect for proof of concept
 
 ### Resource Usage  
 - **Additional RAM**: ~4-6GB for Ollama + embedding model
 - **Storage**: +3GB for nomic-embed-text model
 - **CPU**: Higher usage during embedding generation
-- **Your 32GB VPS**: Can easily handle this load
+- **Your existing database**: Unchanged, just adds AI functions
 
 ## 🎯 Testing the AI Features
 
