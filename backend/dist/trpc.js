@@ -214,6 +214,172 @@ exports.appRouter = router({
             };
         }),
     }),
+    ai: router({
+        // Test embedding generation
+        testEmbedding: publicProcedure
+            .input(schemas_1.testEmbeddingSchema)
+            .output(schemas_1.embeddingResponseSchema)
+            .query(async ({ input }) => {
+            try {
+                const result = await exports.pool.query(`
+            SELECT ai.ollama_embed('nomic-embed-text', $1) as embedding
+          `, [input.text]);
+                const embedding = result.rows[0]?.embedding || [];
+                return {
+                    text: input.text,
+                    embedding: embedding,
+                    dimensions: embedding.length,
+                };
+            }
+            catch (error) {
+                logger.error('Error generating embedding: %s', error.message);
+                throw new Error('Failed to generate embedding. Please check if Ollama is running and pgai is configured properly.');
+            }
+        }),
+        // Semantic search for properties
+        semanticSearch: publicProcedure
+            .input(schemas_1.semanticSearchSchema)
+            .output(schemas_1.semanticSearchResponseSchema)
+            .query(async ({ input }) => {
+            try {
+                const { query, postcode, limit, similarity_threshold } = input;
+                // First, check if we have embeddings table
+                const tableCheck = await exports.pool.query(`
+            SELECT EXISTS (
+              SELECT FROM information_schema.tables 
+              WHERE table_name = 'sw_property_embeddings'
+            );
+          `);
+                if (!tableCheck.rows[0].exists) {
+                    throw new Error('Property embeddings not yet created. Please run the vectorizer setup first.');
+                }
+                const searchQuery = `
+            WITH query_embedding AS (
+              SELECT ai.ollama_embed('nomic-embed-text', $1) as vec
+            )
+            SELECT 
+              c.lmk_key,
+              c.postcode,
+              c.current_energy_rating,
+              c.main_fuel,
+              c.property_type,
+              c.total_floor_area,
+              c.construction_age_band,
+              (e.embedding <=> q.vec) as similarity
+            FROM certificates_stg c
+            JOIN sw_property_embeddings e ON c.lmk_key = e.lmk_key
+            CROSS JOIN query_embedding q
+            WHERE ($2 IS NULL OR c.postcode ILIKE $2 || '%')
+              AND (e.embedding <=> q.vec) <= $4  -- similarity_threshold (lower is more similar)
+            ORDER BY similarity
+            LIMIT $3
+          `;
+                const result = await exports.pool.query(searchQuery, [
+                    query,
+                    postcode,
+                    limit,
+                    1 - similarity_threshold // Convert to distance (pgvector uses distance, not similarity)
+                ]);
+                return {
+                    results: result.rows.map(row => ({
+                        ...row,
+                        similarity: 1 - row.similarity // Convert back to similarity score
+                    })),
+                    query: query,
+                    total_results: result.rows.length,
+                };
+            }
+            catch (error) {
+                logger.error('Error in semantic search: %s', error.message);
+                throw new Error(`Semantic search failed: ${error.message}`);
+            }
+        }),
+        // Find similar properties to a given property
+        findSimilar: publicProcedure
+            .input(schemas_1.findSimilarSchema)
+            .query(async ({ input }) => {
+            try {
+                const { lmk_key, limit, similarity_threshold } = input;
+                // Check if embeddings table exists
+                const tableCheck = await exports.pool.query(`
+            SELECT EXISTS (
+              SELECT FROM information_schema.tables 
+              WHERE table_name = 'sw_property_embeddings'
+            );
+          `);
+                if (!tableCheck.rows[0].exists) {
+                    throw new Error('Property embeddings not yet created. Please run the vectorizer setup first.');
+                }
+                const similarQuery = `
+            WITH reference_property AS (
+              SELECT embedding FROM sw_property_embeddings WHERE lmk_key = $1
+            )
+            SELECT 
+              c.lmk_key,
+              c.postcode,
+              c.current_energy_rating,
+              c.main_fuel,
+              c.property_type,
+              c.total_floor_area,
+              c.construction_age_band,
+              (e.embedding <=> r.embedding) as similarity
+            FROM certificates_stg c
+            JOIN sw_property_embeddings e ON c.lmk_key = e.lmk_key
+            CROSS JOIN reference_property r
+            WHERE c.lmk_key != $1
+              AND (e.embedding <=> r.embedding) <= $3  -- similarity threshold
+            ORDER BY similarity
+            LIMIT $2
+          `;
+                const result = await exports.pool.query(similarQuery, [
+                    lmk_key,
+                    limit,
+                    1 - similarity_threshold
+                ]);
+                return result.rows.map(row => ({
+                    ...row,
+                    similarity: 1 - row.similarity // Convert to similarity score
+                }));
+            }
+            catch (error) {
+                logger.error('Error finding similar properties: %s', error.message);
+                throw new Error(`Failed to find similar properties: ${error.message}`);
+            }
+        }),
+        // Health check for AI services
+        healthCheck: publicProcedure
+            .query(async () => {
+            try {
+                // Test pgai extension
+                const aiCheck = await exports.pool.query(`SELECT test_pgai_installation() as status`);
+                // Test Ollama connection (this will fail gracefully if Ollama isn't ready)
+                let ollamaStatus = 'not_ready';
+                try {
+                    await exports.pool.query(`SELECT ai.ollama_embed('nomic-embed-text', 'test') as test_embed`);
+                    ollamaStatus = 'ready';
+                }
+                catch {
+                    ollamaStatus = 'not_ready';
+                }
+                return {
+                    pgai_status: aiCheck.rows[0]?.status || 'unknown',
+                    ollama_status: ollamaStatus,
+                    embeddings_ready: ollamaStatus === 'ready',
+                    timestamp: new Date().toISOString(),
+                };
+            }
+            catch (error) {
+                logger.error('AI health check failed: %s', error.message);
+                return {
+                    pgai_status: 'error',
+                    ollama_status: 'error',
+                    embeddings_ready: false,
+                    error: error.message,
+                    timestamp: new Date().toISOString(),
+                };
+            }
+        }),
+    }),
 });
 /* ---------- 5. Graceful shutdown ---------- */
 process.on('SIGTERM', async () => {

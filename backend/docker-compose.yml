@@ -2,18 +2,45 @@ version: "3.9"
 
 services:
   postgres:
-    image: postgres:15-alpine
+    image: timescale/timescaledb-ha:pg17
     container_name: coolify-db
     restart: always
     environment:
       POSTGRES_USER: epc_user
       POSTGRES_PASSWORD: 080godwin.com
       POSTGRES_DB: epcdb
+      # PostgreSQL configuration for AI workloads
+      POSTGRES_INITDB_ARGS: "--max-connections=200 --shared-buffers=8GB --work-mem=256MB"
     volumes:
-      - coolify-db:/var/lib/postgresql/data
+      - coolify-db:/home/postgres/pgdata/data
+      - ./init-pgai.sql:/docker-entrypoint-initdb.d/001-init-pgai.sql
+      - ./init-ollama.sh:/docker-entrypoint-initdb.d/002-init-ollama.sh
+    command: >
+      postgres 
+      -c max_connections=200
+      -c shared_buffers=8GB
+      -c effective_cache_size=24GB
+      -c work_mem=256MB
+      -c maintenance_work_mem=2GB
     networks:
       - epc-net
       - coolify
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama-service
+    restart: always
+    volumes:
+      - ollama-data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+    networks:
+      - epc-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   epc-api:
     image: epc-api:latest
@@ -40,6 +67,8 @@ services:
 volumes:
   coolify-db:
     external: true
+  ollama-data:
+    external: false
 
 networks:
   epc-net:

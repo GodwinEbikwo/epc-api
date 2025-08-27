@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.healthResponseSchema = exports.propertyScoreResponseSchema = exports.marketStatsSchema = exports.certificatesResponseSchema = exports.searchLeadsResponseSchema = exports.certificateSchema = exports.leadSchema = exports.certificateSearchSchema = exports.exportLeadsParamsSchema = exports.leadScoreParamsSchema = exports.searchLeadsParamsSchema = void 0;
+exports.semanticSearchResponseSchema = exports.embeddingResponseSchema = exports.propertyWithSimilaritySchema = exports.findSimilarSchema = exports.semanticSearchSchema = exports.testEmbeddingSchema = exports.healthResponseSchema = exports.propertyScoreResponseSchema = exports.marketStatsSchema = exports.certificatesResponseSchema = exports.searchLeadsResponseSchema = exports.certificateSchema = exports.leadSchema = exports.certificateSearchSchema = exports.exportLeadsParamsSchema = exports.leadScoreParamsSchema = exports.searchLeadsParamsSchema = void 0;
 const zod_1 = require("zod");
 const searchLeadsParamsSchema = zod_1.z.object({
     postcode: zod_1.z.string().optional(),
@@ -82,3 +82,44 @@ const healthResponseSchema = zod_1.z.object({
     uptime: zod_1.z.number(),
 });
 exports.healthResponseSchema = healthResponseSchema;
+// AI-related schemas
+const testEmbeddingSchema = zod_1.z.object({
+    text: zod_1.z.string().min(1, 'Text is required for embedding'),
+});
+exports.testEmbeddingSchema = testEmbeddingSchema;
+const semanticSearchSchema = zod_1.z.object({
+    query: zod_1.z.string().min(1, 'Search query is required'),
+    postcode: zod_1.z.string().optional(),
+    limit: zod_1.z.number().min(1).max(50).default(10),
+    similarity_threshold: zod_1.z.number().min(0).max(1).default(0.8),
+});
+exports.semanticSearchSchema = semanticSearchSchema;
+const findSimilarSchema = zod_1.z.object({
+    lmk_key: zod_1.z.string().min(1, 'Property key is required'),
+    limit: zod_1.z.number().min(1).max(20).default(5),
+    similarity_threshold: zod_1.z.number().min(0).max(1).default(0.7),
+});
+exports.findSimilarSchema = findSimilarSchema;
+const propertyWithSimilaritySchema = zod_1.z.object({
+    lmk_key: zod_1.z.string(),
+    postcode: zod_1.z.string(),
+    current_energy_rating: zod_1.z.string().nullable(),
+    main_fuel: zod_1.z.string().nullable(),
+    property_type: zod_1.z.string().nullable(),
+    total_floor_area: zod_1.z.number().nullable(),
+    construction_age_band: zod_1.z.string().nullable(),
+    similarity: zod_1.z.number().min(0).max(1),
+});
+exports.propertyWithSimilaritySchema = propertyWithSimilaritySchema;
+const embeddingResponseSchema = zod_1.z.object({
+    text: zod_1.z.string(),
+    embedding: zod_1.z.array(zod_1.z.number()),
+    dimensions: zod_1.z.number(),
+});
+exports.embeddingResponseSchema = embeddingResponseSchema;
+const semanticSearchResponseSchema = zod_1.z.object({
+    results: zod_1.z.array(propertyWithSimilaritySchema),
+    query: zod_1.z.string(),
+    total_results: zod_1.z.number(),
+});
+exports.semanticSearchResponseSchema = semanticSearchResponseSchema;
